@@ -1,14 +1,15 @@
 using ForwardDiff
 using Plots
-gr()
+using ReverseDiff
 using DifferentialEquations
+using Flux
+using Statistics
+gr()
+# pyplot()
 
 
 # Define SHO Hamiltonian Function
 H(q, p) = 0.5*q^2 + 0.5*p^2
-
-# try out the function
-H(1.0, 1.0)
 
 
 function dH(q, p)
@@ -20,14 +21,6 @@ function dH_analytic(q, p)
     return q, p
 end
 
-
-# try it out
-dH(1.0, 1.0) == dH_analytic(1.0, 1.0)
-dH(1.0, -1.0) == dH_analytic(1.0, -1.0)
-dH(-1.0, 1.0) == dH_analytic(-1.0, 1.0)
-dH(-1.0, -1.0) == dH_analytic(-1.0, -1.0)
-
-
 function H_vec_field(q, p)
     dHdq, dHdp = dH(q, p)
     q̇ = dHdp
@@ -36,18 +29,10 @@ function H_vec_field(q, p)
     return q̇, ṗ
 end
 
-# test it out
-dH(1.0, 2.0)
-H_vec_field(1.0, 2.0)  # (2.0, -1.0)
-
 
 # Visualize the H, it's level curves, and the flow as
 # as tangent vectors to level curves
 # i.e. governing idea is H = const
-
-
-
-
 qs = -1.5:0.1:1.5
 ps = -1.5:0.1:1.5
 
@@ -65,6 +50,7 @@ for q ∈ qs[1:2:end], p ∈ ps[1:2:end]
 end
 
 p1 = contour(qs, ps, H, xlabel="q", ylabel="p", aspect_ratio=1.0, fill=true, colorbar_title="H", size=(800,800), c=:viridis)
+α=0.1
 quiver!(p1, Q, P, quiver=(α .* Q̇, α .* Ṗ), aspect_ratio=1.0, color=:white)
 xlims!(p1, -1.5, 1.5)
 ylims!(p1, -1.5, 1.5)
@@ -94,55 +80,83 @@ plot!(p1, sol[1,:], sol[2, :], color=:cyan, label="q₀=$(q0), p₀=$(p0)")
 
 # Let's set up the Neural Network to approximate the Hamiltonian
 # generate training data with H(q,p) <= 1
-using Distributions
-X_train = rand(Uniform(-1, 1), 2, 100)
+Npoints = 1024
+r_train = sqrt.(rand(1, Npoints))
+φ_train = 2π.*rand(1, Npoints)
+data = vcat(r_train .* cos.(φ_train), r_train .* sin.(φ_train))
+
 
 # set up target data: here we use analytic result for time derivatives
-Y_train = zero(X_train)
+target = zero(data)
 # i.e. q̇= dHdp, ṗ = -dHdq
-Y_train[1,:] .= X_train[2, :]
-Y_train[2,:] .= -X_train[1, :]
-
-train_loader = DataLoader((X_train, Y_train), batchsize=2, )
+target[1,:] .= data[2, :]
+target[2,:] .= -data[1, :]
 
 
-
-scatter!(p1, X_train[1,:], X_train[2,:], c=:green, label="training points")
-
-using Flux
-
-HNN = Chain(Dense(2, 50, tanh), Dense(50,50, tanh), Dense(50, 1), first)
+p2 =  scatter!(p1, data[1,:], data[2,:], c=:green, label="training points")
+#p3 = plot(Q, P, H.(Q, P), st = :surface, xlabel = "q", ylabel = "p", zlabel = "H")
 
 
-H_true = H.(X_train[1,:], X_train[2, :])
-H_approx = HNN(X_train)
 
-# visualize pre-traning error
-scatter(H_approx, H_true)
-dHNN(q::AbstractFloat, p::AbstractFloat) = collect(Flux.gradient.((q,p)->HNN([q, p]), q, p))
+# -------------------------------------------------------------------------------------------------------
+# create model for HNN
 
-function dHNN(x::AbstractArray)
-    return [dHNN(col[1], col[2]) for col ∈ eachcol(x)]
+# define the struct
+struct HNN{M, R, P}
+    model::M  # the internal NN
+    re::R   # for recreating internal NN
+    p::P  # for holding current params of internal NN
+
+
+    # define the constructor
+    function HNN(model)
+        p, re = Flux.destructure(model)
+        return new{typeof(model), typeof(re), typeof(p)}(model, re, p)
+    end
 end
 
-# return flow from HNN
-function HNN_vec_field(X)
-    DH = dHNN(X)
+# define the trainable paramaters
+Flux.trainable(hnn::HNN) = (hnn.p,)
 
-    Y = zero(DH)
-    Y[1, :] .= DH[2, :]
-    Y[2, :] .= -DH[1,:]
-    return Y
+function _hamiltonian_flow(re, p, x)
+    dHdX = Flux.gradient(x->sum(re(p)(x)), x)[1]  # note: re(p)(x) == Model(x)
+    n = size(x,1) ÷ 2  # i.e. how many p's and q's
+    return cat(dHdX[(n+1):2n, :], dHdX[1:n, :], dims=1)
 end
 
-# Compute Loss
-function loss(X, Y)
-    Ŷ = HNN_vec_field(X)
-    Lq = Flux.mse(Ŷ[1,:], Y[1,:])
-    Lp = Flux.mse(Ŷ[2,:], Y[2,:])
+# define how to call the HNN on data
+(hnn::HNN)(X, p=hnn.p) = _hamiltonian_flow(hnn.re, p, X)
 
-    return Lq + Lp
+
+hnn = HNN(
+    Chain(Dense(2, 64, relu), Dense(64, 1))
+)
+
+dataloader = Flux.Data.DataLoader((data, target), batchsize=256, shuffle=true)
+
+p = hnn.p
+
+opt = ADAM()
+
+loss(x, y, p) = mean((hnn(x, p) .- y) .^ 2)
+loss(data, target, p)
+
+
+callback() = println("Loss Neural Hamiltonian DE = $(loss(data, target, p))")
+callback()
+
+
+test_gs = ReverseDiff.gradient(p -> loss(data, target, p), p)
+
+epochs = 1000
+for epoch in 1:epochs
+    for (x, y) in dataloader
+        gs = ReverseDiff.gradient(p -> loss(x, y, p), p)
+        Flux.Optimise.update!(opt, p, gs)
+    end
+    if epoch % 100 == 1
+        callback()
+    end
 end
+callback()
 
-# test it out
-loss(X_train, Y_train)
