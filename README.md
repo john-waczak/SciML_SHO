@@ -28,4 +28,5 @@ Note: GitHub markdown does not support mathjax. See [this](https://latex.codecog
 10. Sparse Identification (e.g. SINDy)
 11. FEM style Physics-Based ML on irregular grid 
 12. Manifold Methods
-
+13. Interaction Networks 
+14. Relational Networks
