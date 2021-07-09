@@ -30,3 +30,6 @@ Note: GitHub markdown does not support mathjax. See [this](https://latex.codecog
 12. Manifold Methods
 13. Interaction Networks 
 14. Relational Networks
+
+
+
