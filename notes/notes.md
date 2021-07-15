@@ -1,0 +1,2 @@
+- [Doing Scientific Machine Learning](https://youtu.be/QwVO0Xh2Hbg?t=11180) - Chris Rackaukas
+- [MIT Course on SciML](https://github.com/mitmath/18337) - Chris Rackauckas 2019 
