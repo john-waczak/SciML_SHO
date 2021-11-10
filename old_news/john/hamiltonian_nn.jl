@@ -4,9 +4,9 @@ using ReverseDiff
 using DifferentialEquations
 using Flux
 using Statistics
-gr()
+# gr()
 # pyplot()
-
+plotly()
 
 # Define SHO Hamiltonian Function
 H(q, p) = 0.5*q^2 + 0.5*p^2
@@ -80,7 +80,7 @@ plot!(p1, sol[1,:], sol[2, :], color=:cyan, label="q₀=$(q0), p₀=$(p0)")
 
 # Let's set up the Neural Network to approximate the Hamiltonian
 # generate training data with H(q,p) <= 1
-Npoints = 1024
+Npoints = 500
 r_train = sqrt.(rand(1, Npoints))
 φ_train = 2π.*rand(1, Npoints)
 data = vcat(r_train .* cos.(φ_train), r_train .* sin.(φ_train))
@@ -94,7 +94,7 @@ target[2,:] .= -data[1, :]
 
 
 p2 =  scatter!(p1, data[1,:], data[2,:], c=:green, label="training points")
-#p3 = plot(Q, P, H.(Q, P), st = :surface, xlabel = "q", ylabel = "p", zlabel = "H")
+p3 = plot(Q, P, H.(Q, P), st = :surface, xlabel = "q", ylabel = "p", zlabel = "H")
 
 
 
@@ -129,14 +129,14 @@ end
 
 
 hnn = HNN(
-    Chain(Dense(2, 64, relu), Dense(64, 1))
+    Chain(Dense(2, 200, relu), Dense(200, 200, relu), Dense(200, 1))
 )
 
-dataloader = Flux.Data.DataLoader((data, target), batchsize=256, shuffle=true)
+dataloader = Flux.Data.DataLoader((data, target), batchsize=500, shuffle=true)
 
 p = hnn.p
 
-opt = ADAM()
+opt = ADAM(10^(-3))
 
 loss(x, y, p) = mean((hnn(x, p) .- y) .^ 2)
 loss(data, target, p)
@@ -148,7 +148,7 @@ callback()
 
 test_gs = ReverseDiff.gradient(p -> loss(data, target, p), p)
 
-epochs = 1000
+epochs = 2000
 for epoch in 1:epochs
     for (x, y) in dataloader
         gs = ReverseDiff.gradient(p -> loss(x, y, p), p)
@@ -160,3 +160,6 @@ for epoch in 1:epochs
 end
 callback()
 
+
+#p3 = plot(Q, P, H.(Q, P), st = :surface, xlabel = "q", ylabel = "p", zlabel = "H")
+#p3 = plot(Q, P, HNN.model.(Q, P), st = :surface, xlabel = "q", ylabel = "p", zlabel = "H")
